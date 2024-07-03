@@ -7,8 +7,11 @@ import comfy.utils
 from .aura_sr import AuraSR
 from .utils import *
 
+model_paths = [os.path.join(folder_paths.models_dir, "aura-sr")]
+if os.path.exists("/stable-diffusion-cache/models"):
+    model_paths.append("/stable-diffusion-cache/models/aura-sr")
 
-folder_paths.folder_names_and_paths["aura-sr"] = ([os.path.join(folder_paths.models_dir, "aura-sr")], folder_paths.supported_pt_extensions)
+folder_paths.folder_names_and_paths["aura-sr"] = (model_paths, folder_paths.supported_pt_extensions)
 
 AuraSRUpscalers = []
 
