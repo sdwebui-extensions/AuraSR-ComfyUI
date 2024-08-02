@@ -7,12 +7,19 @@ import comfy.utils
 from .aura_sr import AuraSR
 from .utils import *
 
-aurasr_folders = [p for p in os.listdir(folder_paths.models_dir) if os.path.isdir(os.path.join(folder_paths.models_dir, p)) and (p.lower() == "aura-sr" or p.lower() == "aurasr" or p.lower() == "aura_sr")]
-aurasr_fullpath = os.path.join(folder_paths.models_dir, aurasr_folders[0]) if len(aurasr_folders) > 0 else os.path.join(folder_paths.models_dir, "Aura-SR")
-if not os.path.isdir(aurasr_fullpath):
-    os.mkdir(aurasr_fullpath)
 
-folder_paths.folder_names_and_paths["aura-sr"] = ([aurasr_fullpath, "/stable-diffusion-cache/models/aura-sr"], folder_paths.supported_pt_extensions)
+if "aura-sr" not in folder_paths.folder_names_and_paths:
+    aurasr_folders = [p for p in os.listdir(folder_paths.models_dir) if os.path.isdir(os.path.join(folder_paths.models_dir, p)) and (p.lower() == "aura-sr" or p.lower() == "aurasr" or p.lower() == "aura_sr")]
+    aurasr_fullpath = os.path.join(folder_paths.models_dir, aurasr_folders[0]) if len(aurasr_folders) > 0 else os.path.join(folder_paths.models_dir, "Aura-SR")
+    if not os.path.isdir(aurasr_fullpath):
+        os.mkdir(aurasr_fullpath)
+
+    folder_paths.folder_names_and_paths["aura-sr"] = ([aurasr_fullpath, "/stable-diffusion-cache/models/aura-sr"], folder_paths.supported_pt_extensions)
+else:
+    aurasr_fullpath = folder_paths.folder_names_and_paths["aura-sr"][0][0]
+    folder_paths.folder_names_and_paths.pop('aura-sr', None)
+    folder_paths.folder_names_and_paths["aura-sr"] = ([aurasr_fullpath, "/stable-diffusion-cache/models/aura-sr"], folder_paths.supported_pt_extensions)
+
 
 
 AuraSRUpscalers = []
@@ -59,6 +66,7 @@ class AuraSRUpscaler:
     def INPUT_TYPES(s):
         return {"required": {"model_name": (folder_paths.get_filename_list("aura-sr"),),
                              "image": ("IMAGE",),
+                             "mode": (["4x", "4x_overlapped_checkboard", "4x_overlapped_constant"],),
                              "reapply_transparency": ("BOOLEAN", {"default": True}),
                              "tile_batch_size": ("INT", {"default": 8, "min": 1, "max": 32}),
                              "device": (["default", "cpu"],),
@@ -131,7 +139,7 @@ class AuraSRUpscaler:
     
     
     
-    def main(self, model_name, image, reapply_transparency, tile_batch_size, device, offload_to_cpu, transparency_mask=None):
+    def main(self, model_name, image, mode, reapply_transparency, tile_batch_size, device, offload_to_cpu, transparency_mask=None):
         
         # set device
         torch_device = model_management.get_torch_device()
@@ -165,27 +173,42 @@ class AuraSRUpscaler:
                 if class_in_memory is not None:
                     class_in_memory.device = device
         
-        # prepare input image and resized_alpha
-        image, resized_alpha = prepare_input(image, transparency_mask, reapply_transparency, self.upscaling_factor)
         
-        # upscale
-        inference_failed = False
-        try:
-            upscaled_image = self.aura_sr.upscale_4x(image=image, max_batch_size=tile_batch_size)
-        except:
-            inference_failed = True
-            print("[AuraSR-ComfyUI] Failed to upscale with AuraSR. Returning original image.")
-            upscaled_image = image
+        # iterate through images input
+        upscaled_images = []
+        reapply_transparency = reapply_transparency if len(image) == 1 else False
+        for tensor_image in image:
         
-        # apply resized_alpha
-        if reapply_transparency and resized_alpha is not None:
+            # prepare input image and resized_alpha
+            input_image, resized_alpha = prepare_input(tensor_image if len(image) != 1 else image, transparency_mask, reapply_transparency, self.upscaling_factor)
+            
+            # upscale
+            inference_failed = False
             try:
-                upscaled_image = paste_alpha(upscaled_image, resized_alpha)
+                if mode == "4x":
+                    upscaled_image = self.aura_sr.upscale_4x(image=input_image, max_batch_size=tile_batch_size)
+                elif mode == "4x_overlapped_checkboard":
+                    upscaled_image = self.aura_sr.upscale_4x_overlapped(image=input_image, max_batch_size=tile_batch_size, weight_type='checkboard')
+                else:
+                    upscaled_image = self.aura_sr.upscale_4x_overlapped(image=input_image, max_batch_size=tile_batch_size, weight_type='constant') 
             except:
-                print("[AuraSR-ComfyUI] Failed to apply alpha layer.")
+                inference_failed = True
+                print("[AuraSR-ComfyUI] Failed to upscale with AuraSR. Returning original image.")
+                upscaled_image = input_image
+            
+            # apply resized_alpha
+            if reapply_transparency and resized_alpha is not None:
+                try:
+                    upscaled_image = paste_alpha(upscaled_image, resized_alpha)
+                except:
+                    print("[AuraSR-ComfyUI] Failed to apply alpha layer.")
+            
+            # back to tensor and add to list
+            upscaled_images.append(pil2tensor(upscaled_image))
         
-        # back to tensor
-        upscaled_image = pil2tensor(upscaled_image)
+        
+        # create output tensor from list of tensors
+        output = torch.cat(upscaled_images, dim=0)
         
         # offload to cpu
         if offload_to_cpu:
@@ -198,7 +221,7 @@ class AuraSRUpscaler:
         if inference_failed:
             self.unload()
         
-        return (upscaled_image, )
+        return (output, )
 
 
 
