@@ -12,7 +12,7 @@ if "aura-sr" not in folder_paths.folder_names_and_paths:
     aurasr_folders = [p for p in os.listdir(folder_paths.models_dir) if os.path.isdir(os.path.join(folder_paths.models_dir, p)) and (p.lower() == "aura-sr" or p.lower() == "aurasr" or p.lower() == "aura_sr")]
     aurasr_fullpath = os.path.join(folder_paths.models_dir, aurasr_folders[0]) if len(aurasr_folders) > 0 else os.path.join(folder_paths.models_dir, "Aura-SR")
     if not os.path.isdir(aurasr_fullpath):
-        os.mkdir(aurasr_fullpath)
+        os.makedirs(aurasr_fullpath, exist_ok=True)
 
     folder_paths.folder_names_and_paths["aura-sr"] = ([aurasr_fullpath, "/stable-diffusion-cache/models/aura-sr"], folder_paths.supported_pt_extensions)
 else:
